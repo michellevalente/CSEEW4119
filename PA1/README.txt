@@ -5,7 +5,7 @@ UNI: ma3360
 
 ------------------------------- Description -----------------------------------
 
-My chat server was separte in 4 files. 
+My chat server was separate in 4 files. 
 
 credentials.txt: has all the credentials to access the chat.
 
