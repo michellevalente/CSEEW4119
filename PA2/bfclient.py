@@ -16,8 +16,8 @@ class Message:
 		self.message = message
 
 def printRoutingTable():
+	''' For debugging '''
 	time.sleep(2)
-	print("TESTE")
 	for neighbor in neighborRT:
 		table = neighborRT[neighbor]
 		for node in table:
@@ -56,7 +56,7 @@ def updateTable(new_table, sender):
 					routingTable[node] = (newCost, sender)
 
 def ReadFile(config_file):
-	''' Reads configuration file '''
+	''' Read configuration file '''
 
 	firstLine = config_file.readline()
 	myconfig = firstLine.split()
@@ -76,7 +76,7 @@ def ReadFile(config_file):
 	return (port, timeout)
 
 def sendRT(s):
-	''' Sends distance vector to neighbors '''
+	''' Send distance vector to neighbors '''
 
 	for client in neighbors:
 		clientAddr, clientPort = client.split(':')
@@ -85,6 +85,7 @@ def sendRT(s):
 		s.sendto(pickle.dumps(messageSnd), (clientAddr,int(clientPort)))
 
 def sendMessage(s, message_type, message, client):
+	''' Send a message to a client ''' 
 	clientAddr, clientPort = client.split(':')
 	messageSnd = Message(message_type, message)
 	s.sendto(pickle.dumps(messageSnd), (clientAddr,int(clientPort)))
@@ -96,8 +97,8 @@ def executeTimeout(timeout, s):
 		time.sleep(timeout)
 		sendRT(s)
 
-def getRT(s):
-	''' get routing table from other nodes '''
+def getMessage(s):
+	''' Get the routing table from other nodes '''
 	while(True):
 		data, addr = s.recvfrom(1024)
 
@@ -105,9 +106,14 @@ def getRT(s):
 		messageRcv = pickle.loads(data)
 		if(messageRcv.message_type == "update"):
 			updateTable(messageRcv.message, sender)
-		if(messageRcv.message_type == "linkdown"):
-			print("linkdown")
+
+		elif(messageRcv.message_type == "linkdown"):
 			routingTable[sender] = (float('inf'), "")
+
+		elif(messageRcv.message_type == "linkup"):
+			cost = neighbors[sender]
+			routingTable[sender] = (cost, sender)
+
 
 def linkDown(s, Addr, Port):
 	''' execute command LINKDOWN ''' 
@@ -120,10 +126,12 @@ def linkDown(s, Addr, Port):
 		print("Invalid parameters for LINKDOWN")
 
 def linkUp(s, Addr, Port):
+	''' execute command LINKUP '''
 	node = str(Addr) + ":" + str(Port)
 	if(node in neighbors):
 		cost = neighbors[node]
 		routingTable[node] = (cost, node)
+		sendMessage(s, "linkup", "linkup", node)
 		sendRT(s)
 	else:
 		print("Invalid parameters for LINKDOWN")
@@ -166,11 +174,13 @@ def getCommand(s):
 			print ("Invalid command")
 
 def defineDistanceVector(client):
+	''' update Distance Vector for Poison reverse functionality '''
 	for node in routingTable:
 		if(node != client and routingTable[node][1] == client):
 			distanceVector[node] = (float('inf'), "")
 		else:
 			distanceVector[node] = routingTable[node]
+
 def main(argv):
 
 	distanceVector = {}
@@ -192,7 +202,7 @@ def main(argv):
 	
 	print "Host: " + host + " Port: " + str(port)
 
-	t1 = threading.Thread(target = getRT, args = (s, ))
+	t1 = threading.Thread(target = getMessage, args = (s, ))
 	t1.daemon = True
 
 	t2 = threading.Thread(target = executeTimeout, args = (timeout, s))
