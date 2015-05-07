@@ -114,7 +114,16 @@ def getMessage(s):
 			cost = neighbors[sender]
 			routingTable[sender] = (cost, sender)
 
+		elif(messageRcv.message_type == "changecost"):
+			neighbors[sender] = messageRcv.message
+			routingTable[sender] = (messageRcv.message, sender)
 
+
+# def informLinkDown(s, node):
+# 	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
+# 	pair = (node, myNode)
+# 	for(node in neighbors):
+# 		sendMessage(s, "linkdown", pair, node)
 def linkDown(s, Addr, Port):
 	''' execute command LINKDOWN ''' 
 	node = str(Addr) + ":" + str(Port)
@@ -134,7 +143,18 @@ def linkUp(s, Addr, Port):
 		sendMessage(s, "linkup", "linkup", node)
 		sendRT(s)
 	else:
-		print("Invalid parameters for LINKDOWN")
+		print("Invalid parameters for LINKUP")
+
+def changeCost(s, Addr, Port, new_cost):
+	''' execute command CHANGECOST '''
+	node = str(Addr) + ":" + str(Port)
+	if(node in neighbors):
+		neighbors[node] = new_cost
+		routingTable[node] = (new_cost, node)
+		sendMessage(s, "changecost", new_cost, node)
+		sendRT(s)
+	else:
+		print("Invalid parameters for CHANGECOST")
 
 def getCommand(s):
 	''' Get commands from user '''
@@ -146,7 +166,6 @@ def getCommand(s):
 
 		command = command_s[0].rstrip()
 		
-
 		if (command == "SHOWRT"):
 			for destination in routingTable:
 				print "Destination: " + destination + ", Cost: " + str(routingTable[destination][0]) + ", Link: " + routingTable[destination][1] + "\n",
@@ -159,13 +178,22 @@ def getCommand(s):
 			else:
 				print("Missing parameters to LINKDOWN")
 
-		elif( command == "LINKUP"):
+		elif(command == "LINKUP"):
 			if(len(command_s) == 3):
 				addr  = command_s[1]
 				port = command_s[2].rstrip()
 				linkUp(s, addr, port)
 			else:
 				print("Missing parameters to LINKUP")
+
+		elif(command == "CHANGECOST"):
+			if(len(command_s) == 4):
+				addr = command_s[1]
+				port = command_s[2]
+				new_cost = float(command_s[3].rstrip())
+				changeCost(s, addr, port, new_cost)
+			else:
+				print("Missing parameters to CHANGECOST")
 
 		elif(command == "CLOSE"):
 			return
@@ -177,7 +205,7 @@ def defineDistanceVector(client):
 	''' update Distance Vector for Poison reverse functionality '''
 	for node in routingTable:
 		if(node != client and routingTable[node][1] == client):
-			distanceVector[node] = (float('inf'), "")
+			distanceVector[node] = (float('inf'), routingTable[node][1])
 		else:
 			distanceVector[node] = routingTable[node]
 
@@ -196,6 +224,7 @@ def main(argv):
 
 	myAddr.append(host)
 	myAddr.append(port)
+
 	# Create a socket
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.bind((host, port))
