@@ -50,7 +50,7 @@ def updateTable(new_table, sender):
 			else:
 				cost = routingTable[node][0]
 				newCost = routingTable[sender][0] + new_table[node][0]
-				if(newCost == float('inf') and node not in neighbors):
+				if(newCost == float('inf') and node not in neighbors and routingTable[node][1] == sender):
 					routingTable[node] = (float('inf'), "")
 				elif(newCost < cost):
 					routingTable[node] = (newCost, sender)
