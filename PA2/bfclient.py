@@ -3,17 +3,27 @@ import socket
 import cPickle as pickle
 import threading
 import time
+import copy
 
 routingTable = {}
 neighborRT = {}
 distanceVector = {}
 neighbors = {}
+times = {}
 myAddr = []
 
 class Message:
 	def __init__(self, message_type, message):
 		self.message_type = message_type
 		self.message = message
+
+class transferFile:
+	def __init__(self, sender, destination, data_file, seqnum, filename):
+		self.sender = sender
+		self.destination = destination
+		self.data_file = data_file
+		self.seqnum = seqnum
+		self.filename = filename
 
 def printRoutingTable():
 	''' For debugging '''
@@ -30,6 +40,7 @@ def printRoutingTable():
 
 def updateTable(new_table, sender):
 	''' Update routing tables '''
+	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	if( sender in neighborRT ):
 		dictSender = neighborRT[sender]
 		for node in new_table:
@@ -40,6 +51,10 @@ def updateTable(new_table, sender):
 					dictSender[node] = (new_table[node][0], new_table[node][1])
 	else:
 		neighborRT[sender] = new_table
+
+	if(sender not in neighbors):
+		neighbors[sender] = new_table[myNode][0]
+		routingTable[sender] = (new_table[myNode][0], sender)
 
 	for node in new_table:
 		myNode = str(myAddr[0]) + ":" + str(myAddr[1])
@@ -94,15 +109,18 @@ def sendMessage(s, message_type, message, client):
 def executeTimeout(timeout, s):
 	''' Send routing table after every timeout'''
 	while(True):
-		time.sleep(timeout)
 		sendRT(s)
+		time.sleep(timeout)
 
 def getMessage(s):
+	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	''' Get the routing table from other nodes '''
 	while(True):
 		data, addr = s.recvfrom(1024)
 
 		sender = str(addr[0]) + ":" + str(addr[1])
+		times[sender] = int(round(time.time() * 1000))
+
 		messageRcv = pickle.loads(data)
 		if(messageRcv.message_type == "update"):
 			updateTable(messageRcv.message, sender)
@@ -118,12 +136,23 @@ def getMessage(s):
 			neighbors[sender] = messageRcv.message
 			routingTable[sender] = (messageRcv.message, sender)
 
+		elif(messageRcv.message_type == "close"):
+			if(messageRcv.message in neighbors):
+				del neighbors[messageRcv.message]
+				routingTable[messageRcv.message] = (float('inf'), "")
 
-# def informLinkDown(s, node):
-# 	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
-# 	pair = (node, myNode)
-# 	for(node in neighbors):
-# 		sendMessage(s, "linkdown", pair, node)
+		elif(messageRcv.message_type == "file"):
+			chunk = messageRcv.message
+			if(chunk.data_file == "eof" ):
+				if(chunk.destination == myNode):
+					print("File received successfully")
+				else:
+					next_hop = routingTable[chunk.destination][1]
+					nextHop_addr, nextHop_port = next_hop.split(':')
+					s.sendto(pickle.dumps(messageRcv), (nextHop_addr, int(nextHop_port)))
+			else:
+				getFile(s, chunk)
+
 def linkDown(s, Addr, Port):
 	''' execute command LINKDOWN ''' 
 	node = str(Addr) + ":" + str(Port)
@@ -156,8 +185,53 @@ def changeCost(s, Addr, Port, new_cost):
 	else:
 		print("Invalid parameters for CHANGECOST")
 
+def sendFile(s, sender, Addr, Port, filename):
+	node = str(Addr) + ":" + str(Port)
+	inFile = open(filename,'r')
+	next_hop = routingTable[node][1]
+	nextHop_addr, nextHop_port = next_hop.split(':')
+	chunk_data = inFile.read(100)
+	seqnum = 0
+	print("Next hop = " + next_hop)
+	while(chunk_data != ""):
+		chunk = transferFile(sender, node, chunk_data, seqnum, filename)
+		message = Message("file", chunk)
+		s.sendto(pickle.dumps(message), (nextHop_addr, int(nextHop_port)))
+		chunk_data = inFile.read(100)
+		seqnum += 1
+		time.sleep(.00001)
+	time.sleep(1)
+	chunk = transferFile(sender, node, "eof", seqnum, filename)
+	message = Message("file", chunk)
+	s.sendto(pickle.dumps(message), (nextHop_addr, int(nextHop_port)))
+	print("File sent successfully")
+
+def getFile(s, chunk):
+	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
+	if(chunk.destination != myNode):
+		next_hop = routingTable[chunk.destination][1]
+		nextHop_addr, nextHop_port = next_hop.split(':')
+		message = Message("file", chunk)
+		s.sendto(pickle.dumps(message), (nextHop_addr, int(nextHop_port)))
+		print("Packet received")
+		print("Source = " + chunk.sender)
+		print("Destination = " + chunk.destination)
+		print("Next hop = " + next_hop)
+
+	else:
+		if(chunk.seqnum == 0):
+			outfile = open("output.jpg", 'w')
+		else:
+			outfile = open("output.jpg", 'a')
+		outfile.write(chunk.data_file)
+		print("Packet received")
+		print("Source = " + chunk.sender)
+		print("Destination = " + chunk.destination)
+
+
 def getCommand(s):
 	''' Get commands from user '''
+	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	while(True):
 		print (">"),
 		commandLine = sys.stdin.readline()
@@ -197,7 +271,15 @@ def getCommand(s):
 
 		elif(command == "CLOSE"):
 			return
-		
+
+		elif(command == "TRANSFER"):
+			if(len(command_s) == 4):
+				filename = command_s[1]
+				addr = command_s[2]
+				port = command_s[3].rstrip()
+				sendFile(s, myNode, addr, port, filename)
+			else:
+				print("Missing parameters to TRANSFER")
 		else:
 			print ("Invalid command")
 
@@ -208,6 +290,23 @@ def defineDistanceVector(client):
 			distanceVector[node] = (float('inf'), routingTable[node][1])
 		else:
 			distanceVector[node] = routingTable[node]
+
+def isAlive(timeout, s):
+	time.sleep(5)
+	while(True):
+		try:
+			neighbors_copy = copy.deepcopy(neighbors)
+			for node in neighbors_copy:
+				if times[node] + timeout*2000 <  int(round(time.time() * 1000)):
+					Addr, Port = node.split(':')
+					linkDown(s, Addr, Port)
+					del neighbors[node]
+		except:
+			pass
+
+def initTimes():
+	for node in neighbors:
+		times[node] = int(round(time.time() * 1000))
 
 def main(argv):
 
@@ -220,7 +319,7 @@ def main(argv):
 	config = open(nameFile)
 	resultsFile = ReadFile(config)
 	port = resultsFile[0]
-	timeout = resultsFile[1]
+	timeout = int(resultsFile[1])
 
 	myAddr.append(host)
 	myAddr.append(port)
@@ -228,6 +327,8 @@ def main(argv):
 	# Create a socket
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	s.bind((host, port))
+
+	initTimes()
 	
 	print "Host: " + host + " Port: " + str(port)
 
@@ -240,8 +341,10 @@ def main(argv):
 	t3 = threading.Thread(target = getCommand, args = (s, ))
 	t3.daemon = True
 	
+	t4 = threading.Thread(target = isAlive, args = (timeout,s ))
+	t4.daemon = True
 	t3.start()
-
+	t4.start()
 	t1.start()
 	t2.start()
 
