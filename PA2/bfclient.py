@@ -4,6 +4,7 @@ import cPickle as pickle
 import threading
 import time
 import copy
+import datetime
 
 routingTable = {}
 neighborRT = {}
@@ -68,6 +69,8 @@ def updateTable(new_table, sender):
 				if(newCost == float('inf') and node not in neighbors and routingTable[node][1] == sender):
 					routingTable[node] = (float('inf'), "")
 				elif(newCost < cost):
+					routingTable[node] = (newCost, sender)
+				elif(routingTable[node][1] == sender):
 					routingTable[node] = (newCost, sender)
 
 def ReadFile(config_file):
@@ -135,7 +138,6 @@ def getMessage(s):
 		elif(messageRcv.message_type == "changecost"):
 			neighbors[sender] = messageRcv.message
 			routingTable[sender] = (messageRcv.message, sender)
-
 		elif(messageRcv.message_type == "close"):
 			if(messageRcv.message in neighbors):
 				del neighbors[messageRcv.message]
@@ -186,18 +188,19 @@ def changeCost(s, Addr, Port, new_cost):
 		print("Invalid parameters for CHANGECOST")
 
 def sendFile(s, sender, Addr, Port, filename):
+	''' send file to another user'''
 	node = str(Addr) + ":" + str(Port)
-	inFile = open(filename,'r')
+	inFile = open(filename,'rb')
 	next_hop = routingTable[node][1]
 	nextHop_addr, nextHop_port = next_hop.split(':')
-	chunk_data = inFile.read(100)
+	chunk_data = inFile.read(200)
 	seqnum = 0
 	print("Next hop = " + next_hop)
 	while(chunk_data != ""):
 		chunk = transferFile(sender, node, chunk_data, seqnum, filename)
 		message = Message("file", chunk)
 		s.sendto(pickle.dumps(message), (nextHop_addr, int(nextHop_port)))
-		chunk_data = inFile.read(100)
+		chunk_data = inFile.read(200)
 		seqnum += 1
 		time.sleep(.00001)
 	time.sleep(1)
@@ -207,6 +210,7 @@ def sendFile(s, sender, Addr, Port, filename):
 	print("File sent successfully")
 
 def getFile(s, chunk):
+	''' receive file from another user'''
 	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	if(chunk.destination != myNode):
 		next_hop = routingTable[chunk.destination][1]
@@ -220,9 +224,9 @@ def getFile(s, chunk):
 
 	else:
 		if(chunk.seqnum == 0):
-			outfile = open("output.jpg", 'w')
+			outfile = open("output", 'wb')
 		else:
-			outfile = open("output.jpg", 'a')
+			outfile = open("output", 'a')
 		outfile.write(chunk.data_file)
 		print("Packet received")
 		print("Source = " + chunk.sender)
@@ -233,16 +237,19 @@ def getCommand(s):
 	''' Get commands from user '''
 	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	while(True):
-		print (">"),
-		commandLine = sys.stdin.readline()
+
+		commandLine = raw_input(">")
 
 		command_s = commandLine.split(' ')
 
 		command = command_s[0].rstrip()
 		
 		if (command == "SHOWRT"):
+			testDisconnected()
+			print(datetime.datetime.now()),
+			print(" Distance vector list is: ")
 			for destination in routingTable:
-				print "Destination: " + destination + ", Cost: " + str(routingTable[destination][0]) + ", Link: " + routingTable[destination][1] + "\n",
+				print "Destination: " + destination + ", Cost: " + str(routingTable[destination][0]) + ", Link: " + routingTable[destination][1]
 		
 		elif (command == "LINKDOWN"):
 			if(len(command_s) == 3):
@@ -285,9 +292,12 @@ def getCommand(s):
 
 def defineDistanceVector(client):
 	''' update Distance Vector for Poison reverse functionality '''
+	myNode = str(myAddr[0]) + ":" + str(myAddr[1])
 	for node in routingTable:
+		if(node == myNode):
+			del routingTable[node]
 		if(node != client and routingTable[node][1] == client):
-			distanceVector[node] = (float('inf'), routingTable[node][1])
+			distanceVector[node] = (float('inf'), "")
 		else:
 			distanceVector[node] = routingTable[node]
 
@@ -297,7 +307,7 @@ def isAlive(timeout, s):
 		try:
 			neighbors_copy = copy.deepcopy(neighbors)
 			for node in neighbors_copy:
-				if times[node] + timeout*2000 <  int(round(time.time() * 1000)):
+				if times[node] + timeout*3000 <  int(round(time.time() * 1000)):
 					Addr, Port = node.split(':')
 					linkDown(s, Addr, Port)
 					del neighbors[node]
@@ -308,6 +318,10 @@ def initTimes():
 	for node in neighbors:
 		times[node] = int(round(time.time() * 1000))
 
+def testDisconnected():
+	for node in routingTable:
+		if(routingTable[node][0] == float('inf')):
+			routingTable[node] = (float('inf'), "")
 def main(argv):
 
 	distanceVector = {}
